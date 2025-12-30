@@ -215,19 +215,6 @@ kubectl get pods -n multi-tier-app --watch
 kubectl delete pod -n multi-tier-app -l run^=load-
 # Pods will scale back down after ~5 minutes
 ```
-
-### Why These Settings?
-
-**Aggressive Scale-Up (30s):**
-- Responds quickly to traffic spikes
-- Prevents request queuing and timeouts
-- Better user experience during load
-
-**Conservative Scale-Down (5min):**
-- Prevents thrashing from variable traffic
-- Avoids constant pod creation/deletion
-- Reduces overhead and cost
-
 ---
 
 ## 🔧 Self-Healing Capabilities
