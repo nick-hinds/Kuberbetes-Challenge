@@ -1,0 +1,26 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: multi-tier-app
+  labels:
+    app: multi-tier-app
+data:
+  # Frontend configuration
+  NGINX_WORKER_PROCESSES: "auto"
+  NGINX_WORKER_CONNECTIONS: "1024"
+  
+  # Backend configuration
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+  API_PORT: "3000"
+  
+  # Redis configuration
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  CACHE_TTL: "3600"
+  
+  # Application settings
+  MAX_CONNECTIONS: "100"
+  REQUEST_TIMEOUT: "30000"

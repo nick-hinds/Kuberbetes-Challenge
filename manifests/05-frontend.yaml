@@ -1,0 +1,402 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+  namespace: multi-tier-app
+  labels:
+    app: frontend
+data:
+  nginx.conf: |
+    user nginx;
+    worker_processes auto;
+    error_log /var/log/nginx/error.log warn;
+    pid /var/run/nginx.pid;
+    
+    events {
+        worker_connections 1024;
+        use epoll;
+        multi_accept on;
+    }
+    
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        
+        log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                        '$status $body_bytes_sent "$http_referer" '
+                        '"$http_user_agent" "$http_x_forwarded_for" '
+                        'rt=$request_time uct="$upstream_connect_time" '
+                        'uht="$upstream_header_time" urt="$upstream_response_time"';
+        
+        access_log /var/log/nginx/access.log main;
+        
+        sendfile on;
+        tcp_nopush on;
+        tcp_nodelay on;
+        keepalive_timeout 65;
+        types_hash_max_size 2048;
+        
+        gzip on;
+        gzip_vary on;
+        gzip_proxied any;
+        gzip_comp_level 6;
+        gzip_types text/plain text/css text/xml text/javascript 
+                   application/json application/javascript application/xml+rss 
+                   application/rss+xml font/truetype font/opentype 
+                   application/vnd.ms-fontobject image/svg+xml;
+        
+        upstream backend {
+            least_conn;
+            server backend-service:3000 max_fails=3 fail_timeout=30s;
+            keepalive 32;
+        }
+        
+        server {
+            listen 80;
+            server_name _;
+            
+            # Health check endpoint
+            location /health {
+                access_log off;
+                return 200 "healthy\n";
+                add_header Content-Type text/plain;
+            }
+            
+            # Metrics endpoint
+            location /nginx_status {
+                stub_status on;
+                access_log off;
+                allow 127.0.0.1;
+                allow 10.0.0.0/8;
+                deny all;
+            }
+            
+            # Frontend static content
+            location / {
+                root /usr/share/nginx/html;
+                index index.html;
+                try_files $uri $uri/ /index.html;
+                
+                add_header Cache-Control "public, max-age=3600";
+                add_header X-Frame-Options "SAMEORIGIN";
+                add_header X-Content-Type-Options "nosniff";
+                add_header X-XSS-Protection "1; mode=block";
+            }
+            
+            # Proxy to backend API
+            location /api/ {
+                proxy_pass http://backend;
+                proxy_http_version 1.1;
+                
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header Connection "";
+                
+                proxy_connect_timeout 5s;
+                proxy_send_timeout 60s;
+                proxy_read_timeout 60s;
+                
+                proxy_buffering on;
+                proxy_buffer_size 4k;
+                proxy_buffers 8 4k;
+                proxy_busy_buffers_size 8k;
+                
+                add_header X-Cache-Status $upstream_cache_status;
+            }
+        }
+    }
+  
+  index.html: |
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Multi-Tier K8s Application</title>
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+            .container {
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                padding: 40px;
+                max-width: 600px;
+                width: 100%;
+            }
+            h1 {
+                color: #333;
+                margin-bottom: 10px;
+                font-size: 28px;
+            }
+            .subtitle {
+                color: #666;
+                margin-bottom: 30px;
+                font-size: 14px;
+            }
+            .status {
+                background: #f7f7f7;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 20px;
+            }
+            .status-item {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 10px;
+                padding: 8px 0;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            .status-item:last-child { border-bottom: none; margin-bottom: 0; }
+            .label { font-weight: 600; color: #555; }
+            .value { color: #667eea; font-family: monospace; }
+            .badge {
+                display: inline-block;
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            .badge.success { background: #10b981; color: white; }
+            .badge.error { background: #ef4444; color: white; }
+            button {
+                background: #667eea;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-size: 14px;
+                font-weight: 600;
+                cursor: pointer;
+                width: 100%;
+                transition: background 0.3s;
+            }
+            button:hover { background: #5568d3; }
+            button:disabled {
+                background: #ccc;
+                cursor: not-allowed;
+            }
+            .response {
+                margin-top: 20px;
+                padding: 15px;
+                background: #f0f9ff;
+                border-left: 4px solid #667eea;
+                border-radius: 4px;
+                display: none;
+            }
+            .response.show { display: block; }
+            pre {
+                background: #1f2937;
+                color: #10b981;
+                padding: 15px;
+                border-radius: 6px;
+                overflow-x: auto;
+                font-size: 13px;
+                margin-top: 10px;
+            }
+            .architecture {
+                margin-top: 20px;
+                padding: 15px;
+                background: #fef3c7;
+                border-radius: 6px;
+                font-size: 13px;
+            }
+            .architecture h3 {
+                margin-bottom: 10px;
+                color: #92400e;
+            }
+            .tier {
+                margin: 8px 0;
+                padding: 8px;
+                background: white;
+                border-radius: 4px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 Multi-Tier Kubernetes Application</h1>
+            <p class="subtitle">Production-grade deployment with auto-scaling and observability</p>
+            
+            <div class="status">
+                <div class="status-item">
+                    <span class="label">Frontend:</span>
+                    <span class="badge success">NGINX Running</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Backend API:</span>
+                    <span class="value">Node.js v18</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Cache Layer:</span>
+                    <span class="value">Redis 7</span>
+                </div>
+                <div class="status-item">
+                    <span class="label">Namespace:</span>
+                    <span class="value">multi-tier-app</span>
+                </div>
+            </div>
+            
+            <button onclick="testAPI()" id="testBtn">Test Backend API</button>
+            
+            <div class="response" id="response">
+                <strong>API Response:</strong>
+                <pre id="apiData"></pre>
+            </div>
+            
+            <div class="architecture">
+                <h3>📊 Architecture Overview</h3>
+                <div class="tier">⚡ <strong>Frontend:</strong> NGINX reverse proxy with gzip compression</div>
+                <div class="tier">🔧 <strong>Backend:</strong> Node.js API with Redis caching</div>
+                <div class="tier">💾 <strong>Cache:</strong> Redis StatefulSet with persistence</div>
+                <div class="tier">📈 <strong>Scaling:</strong> HPA based on CPU/Memory metrics</div>
+                <div class="tier">🔒 <strong>Security:</strong> Network policies + Pod security</div>
+            </div>
+        </div>
+        
+        <script>
+            async function testAPI() {
+                const btn = document.getElementById('testBtn');
+                const responseDiv = document.getElementById('response');
+                const apiDataPre = document.getElementById('apiData');
+                
+                btn.disabled = true;
+                btn.textContent = 'Loading...';
+                
+                try {
+                    const response = await fetch('/api/data');
+                    const data = await response.json();
+                    
+                    apiDataPre.textContent = JSON.stringify(data, null, 2);
+                    responseDiv.classList.add('show');
+                    
+                    btn.textContent = 'Test Backend API';
+                } catch (error) {
+                    apiDataPre.textContent = 'Error: ' + error.message;
+                    responseDiv.classList.add('show');
+                    btn.textContent = 'Test Backend API';
+                } finally {
+                    btn.disabled = false;
+                }
+            }
+        </script>
+    </body>
+    </html>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  namespace: multi-tier-app
+  labels:
+    app: frontend
+    tier: web
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP
+      name: http
+  selector:
+    app: frontend
+    tier: web
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: multi-tier-app
+  labels:
+    app: frontend
+    tier: web
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: frontend
+      tier: web
+  template:
+    metadata:
+      labels:
+        app: frontend
+        tier: web
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - frontend
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: nginx
+        image: nginx:1.28-alpine
+        ports:
+        - containerPort: 80
+          name: http
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: nginx-config
+          mountPath: /usr/share/nginx/html/index.html
+          subPath: index.html
+        resources:
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 80
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 101
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config

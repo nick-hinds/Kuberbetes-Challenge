@@ -1,0 +1,39 @@
+---
+# ServiceMonitor for Prometheus Operator (optional)
+# Requires Prometheus Operator to be installed
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: backend-metrics
+  namespace: multi-tier-app
+  labels:
+    app: backend
+spec:
+  selector:
+    matchLabels:
+      app: backend
+      tier: api
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-metrics
+  namespace: multi-tier-app
+  labels:
+    app: backend
+    tier: api
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+  selector:
+    app: backend
+    tier: api
