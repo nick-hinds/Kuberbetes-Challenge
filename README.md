@@ -1,5 +1,7 @@
 # Multi-Tier Kubernetes Application
 
+### Exercise time: ~1.5 hrs
+
 A production-grade, multi-tier Kubernetes application demonstrating DevOps best practices including auto-scaling, self-healing, observability, and comprehensive security controls.
 
 ## 📋 Table of Contents
